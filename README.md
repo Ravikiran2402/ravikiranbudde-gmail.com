@@ -69,4 +69,4 @@ Multitask Transformer baseline
 ❱❱❱ python3 main.py --model trs  --label_smoothing --noam --emb_dim 300 --hidden_dim 300 --hop 2 --heads 2 --cuda --pretrain_emb --multitask --save_path save/multi-trs/
 
 ```
-# ravikiranbudde-gmail.com
+
