@@ -320,6 +320,7 @@ class Generator(nn.Module):
 class Transformer_experts(nn.Module):
 
     def __init__(self, vocab, decoder_number, model_file_path=None, is_eval=False, load_optim=False):
+
         super(Transformer_experts, self).__init__()
         self.vocab = vocab
         self.vocab_size = vocab.n_words
@@ -349,6 +350,8 @@ class Transformer_experts(nn.Module):
             self.generator.proj.weight = self.embedding.lut.weight
 
         self.criterion = nn.NLLLoss(ignore_index=config.PAD_idx)
+        print("In init module")
+        print(config.label_smoothing)
         if (config.label_smoothing):
             self.criterion = LabelSmoothing(size=self.vocab_size, padding_idx=config.PAD_idx, smoothing=0.1)
             self.criterion_ppl = nn.NLLLoss(ignore_index=config.PAD_idx)
@@ -392,17 +395,17 @@ class Transformer_experts(nn.Module):
             'optimizer': self.optimizer.state_dict(),
             'current_loss': running_avg_ppl
         }
-        #model_save_path = os.path.join(self.model_dir, 'model_{}_{:.4f}_{:.4f}_{:.4f}_{:.4f}_{:.4f}'.format(iter,running_avg_ppl,f1_g,f1_b,ent_g,ent_b) )
-        model_save_path = os.path.join('save/model/','model_{}'.format(iter))
+        model_save_path = os.path.join(self.model_dir,'model_{}'.format(iter)) 
+        #model_save_path = os.path.join('saved_models_testing/','model_{}_30-03-2020_gradclipping=0.25.pt'.format(iter))
         self.best_path = model_save_path
         torch.save(state, model_save_path)
         # print(model_save_path)
-        
+
 
     def train_one_batch(self, batch, iter, train=True):
         enc_batch, _, _, enc_batch_extend_vocab, extra_zeros, _, _ = get_input_from_batch(batch)
         dec_batch, _, _, _, _ = get_output_from_batch(batch)
-        config.noam = True
+        #config.noam = True
         if(config.noam):
             self.optimizer.optimizer.zero_grad()
         else:
@@ -434,7 +437,7 @@ class Transformer_experts(nn.Module):
         # print("listener attention weight:",attention_parameters.data.cpu().numpy())
         # print("===============================================================================")
         if(config.oracle): attention_parameters = self.attention_activation(torch.FloatTensor(batch['target_program'])*1000).cuda()
-        print(batch['target_program'])
+        # print(batch['target_program'])
         attention_parameters = attention_parameters.unsqueeze(-1).unsqueeze(-1) # (batch_size, expert_num, 1, 1)
         #=================change-26-03-2020
         #print(attention_parameters)
@@ -459,8 +462,10 @@ class Transformer_experts(nn.Module):
                 config.oracle=True
             else:
                 config.oracle=False
-
-      
+        loss1 =self.criterion(logit.contiguous().view(-1, logit.size(-1)), dec_batch.contiguous().view(-1))
+        loss2 = nn.CrossEntropyLoss()(logit_prob,torch.LongTensor(batch['program_label']).cuda())
+        # different_losses
+        #print(config.softmax)
         if config.softmax:
             loss = self.criterion(logit.contiguous().view(-1, logit.size(-1)), dec_batch.contiguous().view(-1)) + nn.CrossEntropyLoss()(logit_prob,torch.LongTensor(batch['program_label']).cuda())
             loss_bce_program = nn.CrossEntropyLoss()(logit_prob,torch.LongTensor(batch['program_label']).cuda()).item()
@@ -470,17 +475,26 @@ class Transformer_experts(nn.Module):
         pred_program = np.argmax(logit_prob.detach().cpu().numpy(), axis=1)
         program_acc = accuracy_score(batch["program_label"], pred_program)
 
+        #print("In train_one_batch")
+        #print(config.label_smoothing)
         if(config.label_smoothing): 
-            loss_ppl = self.criterion_ppl(logit.contiguous().view(-1, logit.size(-1)), dec_batch.contiguous().view(-1)).item()
-        
+            #loss_ppl = self.criterion_ppl(logit.contiguous().view(-1, logit.size(-1)), dec_batch.contiguous().view(-1)).item()
+            loss_ppl=loss.item()
         if(train):
             loss.backward()
-            self.optimizer.step()
 
+            # gradient_clipping
+            #torch.nn.utils.clip_grad_norm(self.parameters(), max_norm = 0.25)
+
+            self.optimizer.step()
+        #print(config.label_smoothing)
+        #config.label_smoothing = True
         if(config.label_smoothing):
-            return loss_ppl, math.exp(min(loss_ppl, 100)), loss_bce_program, program_acc
+            return loss1.item(),loss2.item(),loss_ppl, math.exp(min(loss_ppl, 100)), loss_bce_program, program_acc
+            #return loss_ppl, math.exp(min(loss_ppl, 100)), loss_bce_program, program_acc
         else:
-            return loss.item(), math.exp(min(loss.item(), 100)), loss_bce_program, program_acc
+            return loss1.item(),loss2.item(),loss.item(), math.exp(min(loss.item(), 100)), loss_bce_program, program_acc
+            #return loss.item(), math.exp(min(loss.item(), 100)), loss_bce_program, program_acc
 
     def compute_act_loss(self,module):    
         R_t = module.remainders
@@ -528,6 +542,7 @@ class Transformer_experts(nn.Module):
             logit = self.generator(out,attn_dist,enc_batch_extend_vocab, extra_zeros, attn_dist_db=None)
             #logit = F.log_softmax(logit,dim=-1) #fix the name later
             _, next_word = torch.max(logit[:, -1], dim = 1)
+            # print("next word = ", next_word)
             decoded_words.append(['<EOS>' if ni.item() == config.EOS_idx else self.vocab.index2word[ni.item()] for ni in next_word.view(-1)])
             next_word = next_word.data[0]
             if config.USE_CUDA:
@@ -585,8 +600,9 @@ class Transformer_experts(nn.Module):
             filtered_logit = top_k_top_p_filtering(logit[:, -1], top_k=3, top_p=0, filter_value=-float('Inf'))
             # Sample from the filtered distribution
             next_word = torch.multinomial(F.softmax(filtered_logit, dim=-1), 1).squeeze()
+            # print("next word = ", next_word)
             decoded_words.append(['<EOS>' if ni.item() == config.EOS_idx else self.vocab.index2word[ni.item()] for ni in next_word.view(-1)])
-            next_word = next_word.data[0]
+            #  next_word = next_word.data[0]
             if config.USE_CUDA:
                 ys = torch.cat([ys, torch.ones(1, 1).long().fill_(next_word).cuda()], dim=1)
                 ys = ys.cuda()
