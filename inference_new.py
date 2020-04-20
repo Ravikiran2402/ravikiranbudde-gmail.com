@@ -27,8 +27,8 @@ logging.info("Vocab  {} ".format(vocab.n_words))
 
 max_dec_step = 50
 
-#saved_model = torch.load("saved_models_testing/saved_model60000.pt")
-saved_model =  Transformer_experts(vocab,decoder_number=program_number, model_file_path="save2/model_21999", is_eval=True)
+#saved_model = torch.load("saved_models_testing/model_59999_30-03-2020_gradclipping.pt")
+saved_model =  Transformer_experts(vocab,decoder_number=program_number, model_file_path="save/model_a0.5_b1_grad_clip1.5/model_301999", is_eval=True)
 
 saved_model.cuda()
 saved_model = saved_model.eval()
@@ -56,7 +56,11 @@ data_test["situation"] = []
 data_test["target"] = []
 data_test["context"] = []
 
-target = ['This','is','the','default','value','for','the','target','attribute','.']
+# Changing target attribute to input 28-03-2020-8:42pm
+#target = ['This','is','the','default','value','for','the','target','attribute','.']
+print("Enter initial target : ")
+target = input().split(" ")
+
 
 print("Enter the emotion of the conversation : ")
 emotion = input()
@@ -98,7 +102,7 @@ while(True):
     output = []
     for j, batch in pbar:
         #print(type(batch))
-        loss, ppl, bce_prog, acc_prog = saved_model.train_one_batch(batch, 0, train=False)
+        loss1,loss2,loss, ppl, bce_prog, acc_prog = saved_model.train_one_batch(batch, 0, train=False)
         l.append(loss)
         p.append(ppl)
         bce.append(bce_prog)
@@ -123,7 +127,7 @@ while(True):
                         hyp_b=beam_sent,
                         hyp_t=topk_sent)
             """
-        pbar.set_description("loss:{:.4f} ppl:{:.1f}".format(np.mean(l),math.exp(np.mean(l))))
+        pbar.set_description("loss:{:.4f} ppl:{:.1f}".format(np.mean(l),np.exp(np.mean(l))))
     
     output = output[0]
     #======================#
